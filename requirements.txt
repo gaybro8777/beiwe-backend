@@ -3,7 +3,9 @@ Django==2.2.15
 Flask>=1.1.2
 
 #pycryptodome>=3.9.0
+pycryptodomex==3.9.9
 pycrypto
+
 
 # error reporting
 raven[flask]>=6.10.0
