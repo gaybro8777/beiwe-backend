@@ -12,6 +12,7 @@ from math import sqrt
 PROJECT_PATH = __file__.rsplit("/", 2)[0]
 class DevUtilError(BaseException): pass
 
+
 class GlobalTimeTracker:
     """
     Populate with events, prints event time summaries on deallocation.
@@ -106,7 +107,7 @@ class GlobalTimeTracker:
         return wrapper
 
 
-def print_type(display_value=True, **kwargs):
+def print_types(display_value=True, **kwargs):
     if display_value:
         for k, v in kwargs.items():
             print(f"TYPE INFO -- {k}: {v}, {type(v)}")
@@ -114,6 +115,13 @@ def print_type(display_value=True, **kwargs):
         for k, v in kwargs.items():
             print(f"TYPE INFO -- {k}: {type(v)}")
 
+
+def print_type(**kwargs):
+    print("\n")
+    for k, v in kwargs.items():
+        vt = v if isinstance(v, type) else type(v)
+        print(f"{k}: {vt.__name__}, {tuple(x.__name__ for x in vt.mro())}")
+    print("\n")
 
 already_processed = set()
 
