@@ -3,14 +3,16 @@ from datetime import datetime
 
 import jinja2
 from flask import Flask, redirect, render_template
+from flask_cors import CORS
 from raven.contrib.flask import Sentry
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from api import (admin_api, copy_study_api, dashboard_api, data_access_api, data_pipeline_api,
     mobile_api, participant_administration, push_notifications_api, study_api, survey_api)
+from api.tableau_api.views import SummaryStatisticDailyStudyView
+from api.tableau_api.wdc import WebDataConnector
 from authentication.admin_authentication import is_logged_in
 from config.settings import SENTRY_ELASTIC_BEANSTALK_DSN, SENTRY_JAVASCRIPT_DSN
-from libs.push_notification_config import FirebaseMisconfigured, update_firebase_instance
 from libs.security import set_secret_key
 from pages import (admin_pages, data_access_web_form, login_pages, mobile_pages, survey_designer,
     system_admin_pages)
@@ -23,8 +25,24 @@ app.jinja_loader = jinja2.ChoiceLoader(
 set_secret_key(app)
 app.wsgi_app = ProxyFix(app.wsgi_app)
 
+
 # Flask Blueprints
 app.register_blueprint(login_pages.login_pages)
+
+def subdomain(directory):
+    app = Flask(__name__, static_folder=directory + "/static")
+    CORS(app)
+    set_secret_key(app)
+    loader = [app.jinja_loader, jinja2.FileSystemLoader(directory + "/templates")]
+    app.jinja_loader = jinja2.ChoiceLoader(loader)
+    app.wsgi_app = ProxyFix(app.wsgi_app)
+    return app
+
+
+# Register pages here
+app = subdomain("frontend")
+app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
+
 app.register_blueprint(mobile_api.mobile_api)
 app.register_blueprint(admin_pages.admin_pages)
 app.register_blueprint(mobile_pages.mobile_pages)
@@ -40,6 +58,8 @@ app.register_blueprint(copy_study_api.copy_study_api)
 app.register_blueprint(data_pipeline_api.data_pipeline_api)
 app.register_blueprint(dashboard_api.dashboard_api)
 app.register_blueprint(push_notifications_api.push_notifications_api)
+SummaryStatisticDailyStudyView.register_urls(app)
+WebDataConnector.register_urls(app)
 
 # Jinja
 app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
