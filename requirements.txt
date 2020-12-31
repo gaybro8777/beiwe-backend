@@ -1,24 +1,33 @@
-# core libraries
-Django==2.2.14
+# core
 Flask>=1.1.2
 
+Django==2.2.14
+firebase-admin==4.5.0
+
+# various extensions
+djangorestframework==3.12.2
+django-extensions==3.1.0
+django-timezone-field==4.1.1
+flask_cors==3.0.9
+
+python-dateutil==2.8.1
+factory-boy==3.2.0
+
 #pycryptodome>=3.9.0
-pycrypto
+pycrypto==2.6.1  # pycrypto is out of support, we use it for 1 thing that has proven difficult to rewrite.
 
 # error reporting
 raven[flask]>=6.10.0
 cronutils>=0.3.0
 
 # server requirement
-psycopg2==2.8.5
+psycopg2==2.8.6
 
 # Keep these dependencies up to date
 boto3
 pytz
-django-timezone-field
 ipython
-django-extensions
-python-dateutil
-firebase-admin
-factory_boy
-djangorestframework
+
+
+# development
+mock==4.0.3

@@ -10,7 +10,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from api import (admin_api, copy_study_api, dashboard_api, data_access_api, data_pipeline_api,
     mobile_api, participant_administration, push_notifications_api, study_api, survey_api)
 from api.tableau_api.views import SummaryStatisticDailyStudyView
-from api.tableau_api.wdc import WebDataConnector
+from api.tableau_api.web_data_connector import WebDataConnector
 from authentication.admin_authentication import is_logged_in
 from config.settings import SENTRY_ELASTIC_BEANSTALK_DSN, SENTRY_JAVASCRIPT_DSN
 from libs.security import set_secret_key
