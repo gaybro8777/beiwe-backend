@@ -111,10 +111,10 @@ components:
           type: string
         minItems: 1
         type: array
-    participant_patient_id:
+    patient_id:
       description: 8-character participant patient id
       in: path
-      name: participant_patient_id
+      name: patient_id
       required: true
       schema:
         type: string
@@ -144,7 +144,7 @@ components:
     identifiers:
       properties:
         # Identifiers
-        participant_patient_id:
+        patient_id:
           description: 8-character participant patient id
           example: ba86o7ad
           type: string
@@ -333,6 +333,7 @@ components:
         - properties:
             data_type:
               description: Data stream type
+              example: accelerometer
               type: string
             files:
               items:
@@ -357,12 +358,12 @@ components:
               type: integer
 
 paths:
-  '/participants/{participant_patient_id}/data-type/{data_type}/metadata':
+  '/participants/{patient_id}/data-type/{data_type}/metadata':
     get:
       description: Returns data collection metadata about a participant for a specific data type
       operationId: get_data_collection_metadata
       parameters:
-        - $ref: '#/components/parameters/participant_patient_id'
+        - $ref: '#/components/parameters/patient_id'
         - $ref: '#/components/parameters/data_type'
         - $ref: '#/components/parameters/access_key_id'
         - $ref: '#/components/parameters/access_key_secret'
