@@ -25,6 +25,7 @@ class Study(TimestampedModel):
     is_test = models.BooleanField(default=True)
     timezone = TimeZoneField(default="America/New_York", help_text='Timezone of the study')
     deleted = models.BooleanField(default=False)
+    forest_enabled = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
         """ Ensure there is a study device settings attached to this study. """
