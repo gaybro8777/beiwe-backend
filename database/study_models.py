@@ -16,14 +16,25 @@ class Study(TimestampedModel):
     # created alongside it. If the Study is created via the researcher interface (as it
     # usually is) the researcher is immediately shown the DeviceSettings to edit. The code
     # to create the DeviceSettings object is in database.signals.populate_study_device_settings.
+
     name = models.TextField(unique=True, help_text='Name of the study; can be of any length')
     encryption_key = models.CharField(max_length=32, validators=[LengthValidator(32)],
                                       help_text='Key used for encrypting the study data')
     object_id = models.CharField(max_length=24, unique=True, validators=[LengthValidator(24)],
                                  help_text='Permanent UUID attached to this study')
-
+    name = models.TextField(unique=True, help_text='Name of the study; can be of any length')
+    encryption_key = models.CharField(
+        max_length=32, validators=[LengthValidator(32)],
+        help_text='Key used for encrypting the study data'
+    )
+    object_id = models.CharField(
+        max_length=24, unique=True, validators=[LengthValidator(24)],
+        help_text='ID used for naming S3 files'
+    )
     is_test = models.BooleanField(default=True)
-    timezone = TimeZoneField(default="America/New_York", help_text='Timezone of the study')
+    timezone = TimeZoneField(
+        default="America/New_York", help_text='Timezone of the study', null=False, blank=False
+    )
     deleted = models.BooleanField(default=False)
     forest_enabled = models.BooleanField(default=False)
 
@@ -81,6 +92,11 @@ class Study(TimestampedModel):
         ret.pop("encryption_key")
         return ret
 
+    def notification_events(self, **archived_event_filter_kwargs):
+        from database.schedule_models import ArchivedEvent
+        return ArchivedEvent.objects.filter(
+            survey_archive_id__in=self.surveys.all().values_list("archives__id", flat=True)
+        ).filter(**archived_event_filter_kwargs).order_by("-scheduled_time")
 
 class StudyField(models.Model):
     study = models.ForeignKey(Study, on_delete=models.PROTECT, related_name='fields')

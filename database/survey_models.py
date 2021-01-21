@@ -1,5 +1,4 @@
 import json
-from datetime import datetime
 
 from django.db import models
 
@@ -27,8 +26,6 @@ class SurveyBase(TimestampedModel):
     survey_type = models.CharField(max_length=16, choices=SURVEY_TYPE_CHOICES,
                                    help_text='What type of survey this is.')
     settings = JSONTextField(default='{}', help_text='JSON blob containing settings for the survey.')
-    # timings = JSONTextField(default=json.dumps([[], [], [], [], [], [], []]),
-    #                         help_text='JSON blob containing the times at which the survey is sent.')
 
     deleted = models.BooleanField(default=False)
 
@@ -119,6 +116,12 @@ class Survey(SurveyBase):
                               schedule.scheduled_date.day,
                               num_seconds])
         return schedules
+
+    def notification_events(self, **archived_event_filter_kwargs):
+        from database.schedule_models import ArchivedEvent
+        return ArchivedEvent.objects.filter(
+            survey_archive_id__in=self.archives.values_list("id", flat=True)
+        ).filter(**archived_event_filter_kwargs).order_by("-scheduled_time")
 
     def format_survey_for_study(self):
         """
