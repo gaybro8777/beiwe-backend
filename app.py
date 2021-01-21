@@ -41,8 +41,8 @@ def subdomain(directory):
 
 
 # Register pages here
-app = subdomain("frontend")
-app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
+#app = subdomain("frontend")
+#app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
 
 app.register_blueprint(mobile_api.mobile_api)
 app.register_blueprint(admin_pages.admin_pages)
