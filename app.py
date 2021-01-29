@@ -25,24 +25,14 @@ app.jinja_loader = jinja2.ChoiceLoader(
 )
 set_secret_key(app)
 app.wsgi_app = ProxyFix(app.wsgi_app)
-
+CORS(app)
 
 # Flask Blueprints
 app.register_blueprint(login_pages.login_pages)
 
-def subdomain(directory):
-    app = Flask(__name__, static_folder=directory + "/static")
-    CORS(app)
-    set_secret_key(app)
-    loader = [app.jinja_loader, jinja2.FileSystemLoader(directory + "/templates")]
-    app.jinja_loader = jinja2.ChoiceLoader(loader)
-    app.wsgi_app = ProxyFix(app.wsgi_app)
-    return app
-
 
 # Register pages here
-#app = subdomain("frontend")
-#app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
+app.jinja_env.globals['current_year'] = datetime.now().strftime('%Y')
 
 app.register_blueprint(mobile_api.mobile_api)
 app.register_blueprint(admin_pages.admin_pages)
