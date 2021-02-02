@@ -30,9 +30,6 @@ class Study(TimestampedModel):
         help_text='ID used for naming S3 files'
     )
     is_test = models.BooleanField(default=True)
-    timezone_name = models.CharField(
-        max_length=256, default="America/New_York", null=False, blank=False
-    )
     deleted = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
@@ -98,12 +95,6 @@ class Study(TimestampedModel):
     def now(self) -> datetime:
         """ Returns a timezone.now() equivalence in the study's timezone. """
         return localtime(localtime(), timezone=self.timezone)  # localtime(localtime(... saves an import... :D
-
-    @property
-    def timezone(self):
-        """ So pytz.timezone("America/New_York") provides a tzinfo-like object that is wrong by 4
-        minutes.  That's insane.  The dateutil gettz function doesn't have that fun insanity. """
-        return gettz(self.timezone_name)
 
 
 class StudyField(models.Model):

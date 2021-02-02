@@ -1,3 +1,4 @@
+from dateutil.tz import gettz
 from django.core.validators import MinLengthValidator
 from django.db import models
 from django.db.models import F, Func
@@ -159,6 +160,12 @@ class Participant(AbstractPasswordUser):
         return ArchivedEvent.objects.filter(participant=self).filter(
             **archived_event_filter_kwargs
         ).order_by("-scheduled_time")
+
+    @property
+    def timezone(self):
+        """ So pytz.timezone("America/New_York") provides a tzinfo-like object that is wrong by 4
+        minutes.  That's insane.  The dateutil gettz function doesn't have that fun insanity. """
+        return gettz(self.timezone_name)
 
     def __str__(self):
         return '{} {} of Study {}'.format(self.__class__.__name__, self.patient_id, self.study.name)
