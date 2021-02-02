@@ -1,35 +1,50 @@
 from datetime import date, datetime, time, timedelta, tzinfo
 from typing import List
 
-import pytz
+from dateutil.tz import gettz
 from django.core.validators import MaxValueValidator
 from django.db import models
-from django.utils.timezone import is_naive, make_aware
+from django.utils.timezone import localtime, make_aware
 
-from config.constants import ScheduleTypes
-from database.common_models import TimestampedModel, UtilityModel
+from config.constants import API_TIME_FORMAT_WITH_TZ, ScheduleTypes
+from database.common_models import TimestampedModel
 from database.survey_models import Survey, SurveyArchive
+from database.user_models import Participant
 
 
 class AbsoluteSchedule(TimestampedModel):
     survey = models.ForeignKey('Survey', on_delete=models.CASCADE, related_name='absolute_schedules')
-    scheduled_date = models.DateTimeField()
+    date = models.DateField(null=False, blank=False)
+    hour = models.PositiveIntegerField(validators=[MaxValueValidator(23)])
+    minute = models.PositiveIntegerField(validators=[MaxValueValidator(59)])
+
+    @property
+    def event_time(self):
+        return datetime(
+            year=self.date.year,
+            month=self.date.month,
+            day=self.date.day,
+            hour=self.hour,
+            minute=self.minute,
+            tzinfo=self.survey.study.timezone
+        )
 
     @staticmethod
     def create_absolute_schedules(timings: List[List[int]], survey: Survey) -> bool:
         """ Creates new AbsoluteSchedule objects from a frontend-style list of dates and times"""
         survey.absolute_schedules.all().delete()
 
-        if not timings:
+        if survey.deleted or not timings:
             return False
 
         duplicated = False
         for year, month, day, num_seconds in timings:
-            hour = num_seconds // 3600
-            minute = num_seconds % 3600 // 60
-            schedule_date = datetime(year=year, month=month, day=day, hour=hour, minute=minute)
-            # using get_or_create to catch duplicate schedules
-            _, created = AbsoluteSchedule.objects.get_or_create(survey=survey, scheduled_date=schedule_date)
+            _, created = AbsoluteSchedule.objects.get_or_create(
+                survey=survey,
+                date=date(year=year, month=month, day=day),
+                hour=num_seconds // 3600,
+                minute=num_seconds % 3600 // 60
+            )
             if not created:
                 duplicated = True
 
@@ -64,7 +79,7 @@ class RelativeSchedule(TimestampedModel):
         Creates new RelativeSchedule objects from a frontend-style list of interventions and times
         """
         survey.relative_schedules.all().delete()
-        if not timings:
+        if survey.deleted or not timings:
             return False
 
         duplicated = False
@@ -102,7 +117,7 @@ class WeeklySchedule(TimestampedModel):
     def create_weekly_schedules(timings: List[List[int]], survey: Survey) -> bool:
         """ Creates new WeeklySchedule objects from a frontend-style list of seconds into the day. """
 
-        if not timings:
+        if survey.deleted or not timings:
             survey.weekly_schedules.all().delete()
             return False
 
@@ -131,7 +146,7 @@ class WeeklySchedule(TimestampedModel):
     @classmethod
     def export_survey_timings(cls, survey: Survey) -> List[List[int]]:
         """Returns a json formatted list of weekly timings for use on the frontend"""
-        # this sort order results in nicely ordered output.
+        # this weird sort order results in correctly ordered output.
         fields_ordered = ("hour", "minute", "day_of_week")
         timings = [[], [], [], [], [], [], []]
         schedule_components = WeeklySchedule.objects.\
@@ -142,36 +157,20 @@ class WeeklySchedule(TimestampedModel):
             timings[day].append((hour * 60 * 60) + (minute * 60))
         return timings
 
-    def get_prior_and_next_event_times(self, now: datetime=None) -> (datetime, datetime):
-        """ Identify the start of the week relative to the current time, use that to determine this
-        week's (past or present) push notification event time, and the same event for next week.
-        If now is passed in it must have a UTC timezone. """
-
-        if now is None:
-            # handle case of utc date not matching date of local time.
-            today = make_aware(datetime.utcnow(), timezone=pytz.utc).date()
-        elif isinstance(now, datetime) and not is_naive(now) and now.tzinfo.zone == "UTC":
-            # now must be a datetime with a timezone of UTC
-            today = now.date()
-        else:
-            raise TypeError(f"Datetime must be UTC and timezone aware, received {str(now)}")
+    def get_prior_and_next_event_times(self, now: datetime) -> (datetime, datetime):
+        """ Identify the start of the week relative to now, determine this week's push notification
+        moment, then add 7 days. tzinfo of input is used to populate tzinfos of return. """
+        today = now.date()
 
         # today.weekday defines Monday=0, in our schema Sunday=0 so we add 1
         start_of_this_week = today - timedelta(days=((today.weekday()+1) % 7))
 
-        event_this_week = make_aware(
-                datetime(
-                    year=start_of_this_week.year,
-                    month=start_of_this_week.month,
-                    day=start_of_this_week.day,
-                ) +
-                timedelta(
-                    days=self.day_of_week,
-                    hours=self.hour,
-                    minutes=self.minute,
-                ),
-                timezone=pytz.utc,
-        )
+        event_this_week = datetime(
+            year=start_of_this_week.year,
+            month=start_of_this_week.month,
+            day=start_of_this_week.day,
+            tzinfo=now.tzinfo,
+        ) + timedelta(days=self.day_of_week, hours=self.hour, minutes=self.minute)
         event_next_week = event_this_week + timedelta(days=7)
         return event_this_week, event_next_week
 
@@ -208,7 +207,8 @@ class ScheduledEvent(TimestampedModel):
 
     def get_schedule(self):
         number_schedules = sum((
-            self.weekly_schedule is not None, self.relative_schedule is not None,
+            self.weekly_schedule is not None,
+            self.relative_schedule is not None,
             self.absolute_schedule is not None
         ))
 
@@ -226,7 +226,7 @@ class ScheduledEvent(TimestampedModel):
 
     def archive(self):
         # for stupid reasons involving the legacy mechanism for creating a survey archive we need
-        # to handle the case where the object does not exist.
+        # to handle the case where the object does not exist so that we don't break migrations.
         try:
             survey_archive = self.survey.most_recent_archive()
         except SurveyArchive.DoesNotExist:
@@ -241,6 +241,7 @@ class ScheduledEvent(TimestampedModel):
         )
         self.delete()
 
+
 # TODO there is no code that updates the response_time field.  That should be rolled into the
 #  check-for-downloads as an optional parameter passed in.  If it doesn't get hit then there is
 #  no guarantee that the app checked in.
@@ -250,6 +251,68 @@ class ArchivedEvent(TimestampedModel):
     schedule_type = models.CharField(max_length=32, db_index=True)
     scheduled_time = models.DateTimeField(db_index=True)
     response_time = models.DateTimeField(null=True, blank=True, db_index=True)
+
+    @property
+    def survey(self):
+        return self.survey_archive.survey
+
+    @staticmethod
+    def find_notification_events(
+            participant: Participant = None, survey: Survey or str = None, schedule_type: str = None,
+            tz: tzinfo = gettz('America/New_York')
+    ):
+        assert participant is None or isinstance(participant, (Survey, Participant))
+        assert survey is None or isinstance(survey, (Survey,str))
+
+        # allow passing in just a survey - if no survey and participant is a survey
+        if not survey and isinstance(participant, Survey):
+            participant, survey = survey, participant  # I love this line...
+
+        filters = {}
+
+        try:
+            if len(survey) == 24:
+                survey = Survey.objects.get(object_id=survey)
+        except TypeError:
+            pass
+
+        if participant:
+            filters['participant'] = participant
+
+        if schedule_type:
+            filters["schedule_type"] = schedule_type
+
+        if survey:
+            filters["survey_archive__survey"] = survey
+        elif participant:  # if no survey, yes participant:
+            filters["survey_archive__survey__in"] = participant.study.surveys.all()
+
+        query = ArchivedEvent.objects.filter(**filters).order_by(
+            "participant__patient_id", "survey_archive__survey__object_id", "-created_on"
+        )
+
+        print(f"There were {query.count()} sent scheduled events matching your query.")
+        participant_name = ""
+        survey_id = ""
+        for a in query:
+            if a.participant.patient_id != participant_name:
+                print(f"participant {a.participant.patient_id}:")
+                participant_name = a.participant.patient_id
+            if a.survey_archive.survey.object_id != survey_id:
+                print(f"for {a.survey_archive.survey.survey_type} {a.survey_archive.survey.object_id}:")
+                survey_id = a.survey_archive.survey.object_id
+
+            sched_time = localtime(a.scheduled_time, tz)
+            sent_time = localtime(a.created_on, tz)
+            time_diff_minutes = (sent_time - sched_time).total_seconds() / 60
+            sched_time_print = datetime.strftime(sched_time, API_TIME_FORMAT_WITH_TZ).replace("T", " ", 1)
+            sent_time_print = datetime.strftime(sent_time, API_TIME_FORMAT_WITH_TZ).replace("T", " ", 1)
+            print(
+                f"\t{a.schedule_type} schedule for {sched_time_print} - "
+                f"was sent on {sent_time_print}, "
+                f"\u0394 of {time_diff_minutes:.1f} min)"
+                # \u0394 is the delta character
+            )
 
 
 class Intervention(TimestampedModel):

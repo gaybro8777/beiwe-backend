@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from json import JSONDecodeError
 
 import pytz
-from django.utils.timezone import is_aware, is_naive, make_aware
+from django.utils.timezone import is_naive, make_aware
 from firebase_admin import (delete_app as delete_firebase_instance,
     get_app as get_firebase_app, initialize_app as initialize_firebase_app)
 from firebase_admin.credentials import Certificate as FirebaseCertificate
@@ -12,6 +12,7 @@ from config.constants import (ANDROID_FIREBASE_CREDENTIALS, BACKEND_FIREBASE_CRE
     FIREBASE_APP_TEST_NAME, IOS_FIREBASE_CREDENTIALS)
 from database.schedule_models import (AbsoluteSchedule, ArchivedEvent, ScheduledEvent,
     WeeklySchedule)
+from database.study_models import Study
 from database.survey_models import Survey
 from database.system_models import FileAsText
 from database.user_models import Participant
@@ -88,7 +89,7 @@ def check_firebase_instance(require_android=False, require_ios=False) -> bool:
 
 def set_next_weekly(participant: Participant, survey: Survey) -> None:
     ''' Create a next ScheduledEvent for a survey for a particular participant. '''
-    schedule_date, schedule = get_next_weekly_event(survey)
+    schedule_date, schedule = get_next_weekly_event_and_schedule(survey)
 
     # this handles the case where the schedule was deleted. This is a corner case that shouldn't happen
     if schedule_date is not None and schedule is not None:
@@ -102,21 +103,38 @@ def set_next_weekly(participant: Participant, survey: Survey) -> None:
         )
 
 
-def repopulate_weekly_survey_schedule_events(survey: Survey, participant: Participant = None) -> None:
+def repopulate_all_survey_scheduled_events(study: Study, participant: Participant = None):
+    """ Runs all the survey scheduled event generations on the provided entities. """
+
+    for survey in study.surveys.all():
+        # remove any scheduled events on surveys that have been deleted.
+        if survey.deleted:
+            survey.scheduled_events.all().delete()
+            continue
+
+        repopulate_weekly_survey_schedule_events(survey, participant)
+        repopulate_absolute_survey_schedule_events(survey, participant)
+        # there are some cases where we can logically exclude relative surveys.
+        # Don't. Do. That. Just. Run. Everything. Always.
+        repopulate_relative_survey_schedule_events(survey, participant)
+
+
+def repopulate_weekly_survey_schedule_events(survey: Survey, single_participant: Participant = None) -> None:
     """ Clear existing schedules, get participants, bulk create schedules Weekly events are
     calculated in a way that we don't bother checking for survey archives, because they only
     exist in the future. """
     events = survey.scheduled_events.filter(relative_schedule=None, absolute_schedule=None)
-    if participant is not None:
-        events = events.filter(participant=participant)
-        participant_ids = [participant.pk]
+    if single_participant:
+        events = events.filter(participant=single_participant)
+        participant_ids = [single_participant.pk]
     else:
         participant_ids = survey.study.participants.values_list("pk", flat=True)
+
     events.delete()
 
     try:
-        # forces tz-aware schedule_date
-        schedule_date, schedule = get_next_weekly_event(survey)
+        # get_next_weekly_event forces tz-aware schedule_date datetime object
+        schedule_date, schedule = get_next_weekly_event_and_schedule(survey)
     except NoSchedulesException:
         return
 
@@ -134,31 +152,28 @@ def repopulate_weekly_survey_schedule_events(survey: Survey, participant: Partic
     )
 
 
-def repopulate_absolute_survey_schedule_events(survey: Survey, participant: Participant = None) -> None:
+def repopulate_absolute_survey_schedule_events(survey: Survey, single_participant: Participant = None) -> None:
     """
     Creates new ScheduledEvents for the survey's AbsoluteSchedules while deleting the old
     ScheduledEvents related to the survey
     """
     # if the event is from an absolute schedule, relative and weekly schedules will be None
     events = survey.scheduled_events.filter(relative_schedule=None, weekly_schedule=None)
-    if participant is not None:
-        events = events.filter(participant=participant)
+    if single_participant:
+        events = events.filter(participant=single_participant)
     events.delete()
 
     new_events = []
-    for schedule_pk, scheduled_time in survey.absolute_schedules.values_list("pk", "scheduled_date"):
-        # if the schedule is somehow not tz-aware, force update it.
-        if is_naive(scheduled_time):
-            scheduled_time = make_aware(scheduled_time, survey.study.timezone)
-            AbsoluteSchedule.objects.filter(pk=schedule_pk).update(scheduled_time=scheduled_time)
-
+    for abs_sched in survey.absolute_schedules.all():
+        scheduled_time = abs_sched.event_time
         # if one participant
-        if participant is not None:
+        if single_participant:
             archive_exists = ArchivedEvent.objects.filter(
                 survey_archive__survey=survey,
                 scheduled_time=scheduled_time,
-                participant_id=participant.pk).exists()
-            relevant_participants = [] if archive_exists else [participant.pk]
+                participant_id=single_participant.pk
+            ).exists()
+            relevant_participants = [] if archive_exists else [single_participant.pk]
 
         # if many participants
         else:
@@ -176,7 +191,7 @@ def repopulate_absolute_survey_schedule_events(survey: Survey, participant: Part
                 survey=survey,
                 weekly_schedule=None,
                 relative_schedule=None,
-                absolute_schedule_id=schedule_pk,
+                absolute_schedule_id=abs_sched.pk,
                 scheduled_time=scheduled_time,
                 participant_id=participant_id
             ))
@@ -184,16 +199,13 @@ def repopulate_absolute_survey_schedule_events(survey: Survey, participant: Part
     ScheduledEvent.objects.bulk_create(new_events)
 
 
-def repopulate_relative_survey_schedule_events(survey: Survey, participant: Participant = None) -> None:
+def repopulate_relative_survey_schedule_events(survey: Survey, single_participant: Participant = None) -> None:
     """ Creates new ScheduledEvents for the survey's RelativeSchedules while deleting the old
     ScheduledEvents related to the survey. """
-    study_tz = survey.study.timezone or pytz.timezone("America/New_York")
-
     # Clear out existing events.
-    # if the event is from an relative schedule, absolute and weekly schedules will be None
     events = survey.scheduled_events.filter(absolute_schedule=None, weekly_schedule=None)
-    if participant is not None:
-        events = events.filter(participant=participant)
+    if single_participant:
+        events = events.filter(participant=single_participant)
     events.delete()
 
     # This is per schedule, and a participant can't have more than one intervention date per
@@ -201,16 +213,16 @@ def repopulate_relative_survey_schedule_events(survey: Survey, participant: Part
     # whether an event ever triggered on that survey.
     new_events = []
     for relative_schedule in survey.relative_schedules.all():
-        # only interventions that have been marked, handle single user case, get data points.
+        # only interventions that have been marked (have a date), restrict single user case, get data points.
         interventions_query = relative_schedule.intervention.intervention_dates.exclude(date=None)
-        if participant is None:
-            interventions_query = interventions_query.filter(participant=participant)
+        if single_participant:
+            interventions_query = interventions_query.filter(participant=single_participant)
         interventions_query = interventions_query.values_list("participant_id", "date")
 
         for participant_id, intervention_date in interventions_query:
+            # + below is correct, 'days_after' is negative or 0 for days before and day of.
             scheduled_date = intervention_date + timedelta(days=relative_schedule.days_after)
-            schedule_time = relative_schedule.scheduled_time(scheduled_date, study_tz)
-
+            schedule_time = relative_schedule.scheduled_time(scheduled_date, survey.study.timezone)
             # skip if already sent (archived event matching participant, survey, and schedule time)
             if ArchivedEvent.objects.filter(
                 participant_id=participant_id,
@@ -231,20 +243,20 @@ def repopulate_relative_survey_schedule_events(survey: Survey, participant: Part
     ScheduledEvent.objects.bulk_create(new_events)
 
 
-def get_next_weekly_event(survey: Survey) -> (datetime, WeeklySchedule):
+def get_next_weekly_event_and_schedule(survey: Survey) -> (datetime, WeeklySchedule):
     """ Determines the next time for a particular survey, provides the relevant weekly schedule. """
-    now = make_aware(datetime.utcnow(), timezone=pytz.utc)
+    now = survey.study.now()
     timing_list = []
+    # our possible next weekly event may be this week, or next week; get this week if it hasn't
+    # happened, next week if it has.  A survey can have many weekly schedules, grab them all.
     for weekly_schedule in survey.weekly_schedules.all():
         this_week, next_week = weekly_schedule.get_prior_and_next_event_times(now)
         timing_list.append((this_week if now < this_week else next_week, weekly_schedule))
 
-    # handle case where there are no scheduled events
     if not timing_list:
-        raise NoSchedulesException
+        raise NoSchedulesException()
 
+    # get the earliest next schedule_date
     timing_list.sort(key=lambda date_and_schedule: date_and_schedule[0])
     schedule_date, schedule = timing_list[0]
-    if not is_aware(schedule_date):
-        schedule_date = make_aware(schedule_date, survey.study.timezone)
     return schedule_date, schedule

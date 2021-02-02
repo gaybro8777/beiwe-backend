@@ -31,6 +31,7 @@ def delete_survey(survey_id=None):
     # mark as deleted, delete all schedules and schedule events
     survey.deleted = True
     survey.save()
+    # clear out any active schedules
     survey.absolute_schedules.all().delete()
     survey.relative_schedules.all().delete()
     survey.weekly_schedules.all().delete()

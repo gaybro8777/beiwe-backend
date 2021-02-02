@@ -69,7 +69,7 @@ class Survey(SurveyBase):
         return survey
 
     @classmethod
-    def create_with_settings(cls, survey_type, **kwargs):
+    def create_with_settings(cls, survey_type: str, **kwargs):
         """
         Create a new Survey with the provided survey type and attached to the given Study,
         as well as any other given keyword arguments. If the Survey is audio/image and no other
@@ -95,7 +95,7 @@ class Survey(SurveyBase):
     def relative_timings(self):
         """
         Returns a json serializable object that represents the relative schedules of the survey
-        The return object is a list of lists
+        The return object is a list of lists of intervention ids, days offset, and seconds offset.
         """
         schedules = []
         for schedule in self.relative_schedules.all():
@@ -106,15 +106,13 @@ class Survey(SurveyBase):
     def absolute_timings(self):
         """
         Returns a json serializable object that represents the absolute schedules of the survey
-        The return object is a list of lists
+        The return object is a list of lists of the year, month, day and seconds within the day.
         """
         schedules = []
         for schedule in self.absolute_schedules.all():
-            num_seconds = schedule.scheduled_date.minute * 60 + schedule.scheduled_date.hour * 3600
-            schedules.append([schedule.scheduled_date.year,
-                              schedule.scheduled_date.month,
-                              schedule.scheduled_date.day,
-                              num_seconds])
+            event_time = schedule.event_time
+            num_seconds = event_time.minute * 60 + event_time.hour * 3600
+            schedules.append([event_time.year, event_time.month, event_time.day, num_seconds])
         return schedules
 
     def notification_events(self, **archived_event_filter_kwargs):
