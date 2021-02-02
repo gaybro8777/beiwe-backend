@@ -183,3 +183,15 @@ def disable_api_key():
     ApiKey.objects.filter(researcher=get_session_researcher(), access_key_id=form.cleaned_data['api_key_id'], is_active=True).update(is_active=False)
     return redirect(url_for("admin_pages.manage_credentials"))
 
+
+@admin_pages.route('/forest_status/<string:study_id>', methods=['GET'])
+@authenticate_researcher_study_access
+def forest_status(study_id=None):
+    study = Study.objects.get(pk=study_id)
+    return redirect('/edit_study/{:d}'.format(study.id))
+
+@admin_pages.route('/study_analysis_progress/<string:study_id>', methods=['GET'])
+@authenticate_researcher_study_access
+def study_analysis_progress(study_id=None):
+    study = Study.objects.get(pk=study_id)
+    return redirect('/edit_study/{:d}'.format(study.id))
